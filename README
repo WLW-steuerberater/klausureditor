@@ -1,0 +1,13 @@
+# Klausureditor
+
+Browserbasierter Prüfungseditor mit PDF-Export.
+Eine Kooperation von WLW und Endriss.
+
+Live: https://klausureditor.de
+Lizenz: GPL v2 oder höher (siehe LICENSE)
+Verwendete Komponenten: siehe THIRD-PARTY.md
+
+## Selbst hosten
+index.html, lizenz.html, impressum.html und assets/ auf einen Webserver legen.
+Zusätzlich werden benötigt (self-hosted, siehe THIRD-PARTY.md):
+tinymce, pdfmake und html-to-pdfmake im Ordner vendor/.
