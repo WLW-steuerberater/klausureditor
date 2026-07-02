@@ -1,0 +1,632 @@
+<!doctype html>
+<!--
+  Prüfungseditor – eine Kooperation von WLW und Endriss
+  Copyright (C) 2026 WLW
+
+  Dieses Programm ist freie Software: Sie können es unter den Bedingungen
+  der GNU General Public License, Version 2 oder (nach Ihrer Wahl) jeder
+  späteren Version, weitergeben und/oder verändern (siehe Datei LICENSE).
+
+  Dieses Programm wird in der Hoffnung verbreitet, dass es nützlich ist,
+  aber OHNE JEDE GEWÄHR; sogar ohne die implizite Gewähr der MARKTREIFE
+  oder der EIGNUNG FÜR EINEN BESTIMMTEN ZWECK.
+
+  Quellcode: https://github.com/IHR-ACCOUNT/klausureditor  (Link anpassen)
+  Eingebundene Komponenten und deren Lizenzen: siehe THIRD-PARTY.md
+-->
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Prüfungseditor – WLW × Endriss</title>
+
+<!-- Alles lokal von eurem Server (kein CDN, keine Drittanfragen) -->
+<script src="vendor/tinymce/tinymce.min.js"></script>
+<script src="vendor/pdfmake/pdfmake.min.js"></script>
+<script src="vendor/pdfmake/vfs_fonts.js"></script>
+<script src="vendor/html-to-pdfmake/browser.js"></script>
+
+<style>
+  :root{
+    --wlw:#2B62B0;          /* WLW-Blau */
+    --endriss:#0F5B4B;      /* Endriss-Dunkelgrün */
+    --mint:#2BE080;         /* Endriss-Mintpunkt */
+    --ink:#1F2A44; --muted:#6B7280; --line:#E5E7EB;
+    --grad:linear-gradient(90deg, #6facff 0%, var(--wlw) 22%, var(--endriss) 65%, var(--mint) 115%);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;}
+  body{font-family:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; display:flex; flex-direction:column; height:100vh; overflow:hidden; color:var(--ink);}
+
+  /* ---- Kopfzeile: links weiß (Logos), Verlauf beginnt am Titel ---- */
+  .topbar{
+    flex:0 0 auto;
+    display:flex; align-items:stretch;
+    background:#fff;
+  }
+  .zone-white{
+    display:flex; align-items:center; gap:10px;
+    padding:10px 18px; background:#fff;
+  }
+  .zone-grad{
+    flex:1 1 auto; min-width:0;
+    display:flex; align-items:center; gap:16px;
+    padding:10px 18px;
+    background:var(--grad);
+    color:#fff;
+  }
+
+  .zone-white img{display:block; height:30px; width:auto;}
+  .zone-white img.logo-wlw{height:52px;}
+  .zone-white .x{
+    font-size:16px; font-weight:700; line-height:1;
+    background:var(--grad);
+    -webkit-background-clip:text; background-clip:text;
+    -webkit-text-fill-color:transparent; color:transparent;
+  }
+  .apptitle{
+    display:flex; flex-direction:column; gap:2px; margin-right:auto;
+  }
+  .apptitle b{font-size:15px; font-weight:600; letter-spacing:.2px;}
+  .apptitle small{font-size:11px; color:rgba(255,255,255,.78); letter-spacing:.3px;}
+
+  .status{font-size:12px; color:rgba(255,255,255,.85); white-space:nowrap;}
+
+  .field{display:flex; flex-direction:column; gap:3px;}
+  .field label{font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; color:rgba(255,255,255,.85); font-weight:600;}
+  .field input{
+    font:inherit; font-size:13.5px; color:var(--ink);
+    border:0; border-radius:8px; padding:8px 10px; width:180px; background:#fff;
+  }
+  .field input:focus{outline:3px solid rgba(43,224,128,.45);}
+  /* Inline-Fehlerhinweis an den Feldern */
+  .field .fehlerhinweis{display:none; color:#FFB4B4; font-weight:700; text-transform:none; letter-spacing:0;}
+  .field.fehler input{outline:3px solid rgba(229,72,77,.95);}
+  .field.fehler .fehlerhinweis{display:inline;}
+  /* PDF-Vorschau-Overlay */
+  .pdfoverlay{
+    position:fixed; inset:0; z-index:100;
+    background:rgba(15,23,42,.55);
+    display:none; align-items:center; justify-content:center;
+  }
+  .pdfoverlay.offen{display:flex;}
+  .pdfbox{
+    background:#fff; border-radius:14px; overflow:hidden;
+    width:min(920px, 94vw); height:88vh;
+    display:flex; flex-direction:column;
+    box-shadow:0 24px 60px -12px rgba(0,0,0,.5);
+  }
+  .pdfbox .kopf{
+    display:flex; align-items:center; gap:10px;
+    padding:10px 14px; border-bottom:1px solid var(--line);
+  }
+  .pdfbox .kopf b{font-size:15px; margin-right:auto; color:var(--ink);}
+  .pdfbox .kopf .btn-gruen{background:#6facff; color:#fff;}
+  .pdfbox .kopf .btn-gruen:hover{background:#5b9bf5;}
+  .pdfbox .kopf .btn-grau{background:#fff; color:var(--ink); border:1px solid var(--line);}
+  .pdfbox .kopf .btn-grau:hover{border-color:var(--muted);}
+  .pdfbox iframe{flex:1; width:100%; border:0;}
+  /* Buttons/Timer auf gleicher Höhe wie die Eingabefelder (Label sitzt jetzt darunter) */
+  .zone-grad > button.btn, .zone-grad > .timerwrap{margin-bottom:19px;}
+
+  button{font:inherit; cursor:pointer;}
+  .btn{
+    font-size:13.5px; font-weight:600; line-height:1;
+    border-radius:8px; padding:10px 16px; border:1px solid transparent;
+    transition:transform .05s, background .12s, border-color .12s;
+  }
+  .btn:active{transform:translateY(1px);}
+  .btn-ghost{background:rgba(255,255,255,.16); color:#fff; border-color:rgba(255,255,255,.35);}
+  .btn-ghost:hover{background:rgba(255,255,255,.26);}
+  .btn-primary{background:#fff; color:var(--endriss); box-shadow:0 2px 10px -3px rgba(0,0,0,.4);}
+  .btn-primary:hover{background:#F0FDF6;}
+  .btn:focus-visible{outline:2px solid #fff; outline-offset:2px;}
+
+  /* ---- Timer ---- */
+  .timerwrap{position:relative; display:flex; align-items:center;}
+  .timerpanel{
+    position:absolute; top:calc(100% + 10px); right:0; z-index:50;
+    background:#fff; color:var(--ink);
+    border-radius:10px; padding:12px 14px;
+    box-shadow:0 10px 30px -8px rgba(0,0,0,.35);
+    display:none; align-items:flex-end; gap:10px;
+  }
+  .timerpanel.offen{display:flex;}
+  .timerpanel .field input{border:1px solid var(--line); width:90px;}
+  .timerpanel .field label{color:var(--muted);}
+  .timerpanel .btn-start{background:#6facff; color:#fff;}
+  .timerpanel .btn-start:hover{background:#5b9bf5;}
+
+  .timerchip{
+    display:none; align-items:center; gap:8px;
+    background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.35);
+    border-radius:8px; padding:8px 12px; font-size:13.5px; font-weight:600;
+  }
+  .timerchip.aktiv{display:flex;}
+  .timerchip.ablauf{background:#B4232A; border-color:#B4232A;}
+  .timerchip .stopbtn{
+    background:transparent; border:0; color:rgba(255,255,255,.85);
+    font-size:15px; line-height:1; padding:0 0 0 4px; cursor:pointer;
+  }
+  .timerchip .stopbtn:hover{color:#fff;}
+
+  /* ---- Zeit-abgelaufen-Hinweis ---- */
+  .overlay{
+    position:fixed; inset:0; z-index:100;
+    background:rgba(15,23,42,.45);
+    display:none; align-items:center; justify-content:center;
+  }
+  .overlay.offen{display:flex;}
+  .overlaybox{
+    background:#fff; color:var(--ink);
+    border-radius:14px; padding:28px 32px;
+    max-width:380px; width:calc(100% - 40px);
+    text-align:center;
+    box-shadow:0 24px 60px -12px rgba(0,0,0,.45);
+  }
+  .overlaybox h2{margin:0 0 8px; font-size:20px;}
+  .overlaybox p{margin:0 0 20px; font-size:14px; color:var(--muted);}
+  .overlaybox .row{display:flex; gap:10px; justify-content:center;}
+  .overlaybox .btn-grau{background:#fff; color:var(--ink); border:1px solid var(--line);}
+  .overlaybox .btn-grau:hover{border-color:var(--muted);}
+  .overlaybox .btn-gruen{background:var(--endriss); color:#fff;}
+  .overlaybox .btn-gruen:hover{background:#0c4a3d;}
+
+  /* ---- Editor füllt den Rest ---- */
+  .editorwrap{flex:1 1 auto; min-height:0;}
+  .editorwrap .tox.tox-tinymce{height:100% !important; border:0 !important;}
+  .tox .tox-edit-area::before{border:0 !important; box-shadow:none !important;}
+  .tox .tox-toolbar__primary{justify-content:flex-start;}
+
+  @media (max-width:1180px){ .apptitle small{display:none;} }
+  @media (max-width:980px){
+    .topbar{flex-wrap:wrap;}
+    .zone-grad{flex-wrap:wrap; gap:12px;}
+    .field input{width:140px;}
+    .status{display:none;}
+  }
+</style>
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="zone-white">
+      <img class="logo-wlw" src="assets/logo-wlw.png" alt="WLW" />
+      <span class="x">×</span>
+      <img src="assets/logo-endriss.png" alt="Endriss" />
+    </div>
+
+    <div class="zone-grad">
+      <span class="apptitle">
+        <b>Prüfungseditor</b>
+        <small>Eine Kooperation von WLW und Endriss · <a href="lizenz.html" target="_blank" rel="noopener" style="color:rgba(255,255,255,.78); text-decoration:underline;">Open Source (GPL)</a></small>
+      </span>
+
+      <span class="status" id="saveStatus"></span>
+
+    <!-- Timer -->
+    <div class="timerwrap">
+      <button class="btn btn-ghost" id="btnTimer" type="button">Timer hinzufügen</button>
+      <span class="timerchip" id="timerChip">
+        <span id="timerText">⏱ 0 Min</span>
+        <button class="stopbtn" id="btnTimerStop" type="button" title="Timer beenden">✕</button>
+      </span>
+      <div class="timerpanel" id="timerPanel">
+        <span class="field">
+          <label for="timerStunden">Stunden</label>
+          <input id="timerStunden" type="number" min="0" max="12" value="1" />
+        </span>
+        <span class="field">
+          <label for="timerMinuten">Minuten</label>
+          <input id="timerMinuten" type="number" min="0" max="59" value="30" />
+        </span>
+        <button class="btn btn-start" id="btnTimerStart" type="button">Timer starten</button>
+      </div>
+    </div>
+
+    <span class="field" id="feldTitel">
+      <input id="examTitle" type="text" value="" />
+      <label for="examTitle">Klausur <small class="fehlerhinweis">– fehlt noch</small></label>
+    </span>
+    <span class="field" id="feldName">
+      <input id="examName" type="text" value="" />
+      <label for="examName">Name <small class="fehlerhinweis">– fehlt noch</small></label>
+    </span>
+    <button class="btn btn-ghost" id="btnReset" type="button">Neu anfangen</button>
+    <button class="btn btn-primary" id="btnPdf" type="button">PDF herunterladen</button>
+    </div>
+  </header>
+
+  <div class="overlay" id="zeitOverlay" role="alertdialog" aria-labelledby="zeitTitel">
+    <div class="overlaybox">
+      <h2 id="zeitTitel">⏱ Zeit abgelaufen</h2>
+      <p>Die eingestellte Bearbeitungszeit ist vorbei.</p>
+      <div class="row">
+        <button class="btn btn-grau" id="btnOverlaySchliessen" type="button">Schließen</button>
+        <button class="btn btn-gruen" id="btnOverlayPdf" type="button">PDF herunterladen</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="pdfoverlay" id="pdfOverlay" role="dialog" aria-label="PDF-Vorschau">
+    <div class="pdfbox">
+      <div class="kopf">
+        <b>Vorschau</b>
+        <button class="btn btn-gruen" id="btnVorschauDownload" type="button">PDF herunterladen</button>
+        <button class="btn btn-grau" id="btnVorschauSchliessen" type="button">Schließen</button>
+      </div>
+      <iframe id="pdfFrame" title="PDF-Vorschau"></iframe>
+    </div>
+  </div>
+
+  <div class="editorwrap">
+    <textarea id="editor"></textarea>
+  </div>
+
+<script>
+  var SPEICHER_KEY = 'klausureditor:entwurf';
+  var TIMER_KEY    = 'klausureditor:timerende';
+  var speicherTimer;
+
+  function statusAnzeigen(text){
+    document.getElementById('saveStatus').textContent = text;
+  }
+
+  /* ---------- Automatisches Zwischenspeichern ---------- */
+  function entwurfSpeichern(){
+    if (!tinymce.activeEditor) return;
+    try {
+      localStorage.setItem(SPEICHER_KEY, tinymce.activeEditor.getContent());
+      var t = new Date();
+      var hh = String(t.getHours()).padStart(2,'0');
+      var mm = String(t.getMinutes()).padStart(2,'0');
+      var ss = String(t.getSeconds()).padStart(2,'0');
+      statusAnzeigen('Automatisch gesichert um ' + hh + ':' + mm + ':' + ss);
+    } catch (e) {
+      statusAnzeigen('Konnte nicht sichern.');
+    }
+  }
+  function speichernAnstossen(){ clearTimeout(speicherTimer); speicherTimer = setTimeout(entwurfSpeichern, 600); }
+
+  /* ---------- Timer ---------- */
+  var timerIntervall = null;
+
+  var elBtnTimer  = document.getElementById('btnTimer');
+  var elPanel     = document.getElementById('timerPanel');
+  var elChip      = document.getElementById('timerChip');
+  var elText      = document.getElementById('timerText');
+
+  function restFormatieren(ms){
+    var gesamtMin = Math.ceil(ms / 60000);
+    if (gesamtMin < 1) return '< 1 Min';
+    var h = Math.floor(gesamtMin / 60);
+    var m = gesamtMin % 60;
+    if (h > 0) return h + ' Std ' + m + ' Min';
+    return m + ' Min';
+  }
+
+  function timerAnzeigen(){
+    var ende = parseInt(localStorage.getItem(TIMER_KEY) || '0', 10);
+    if (!ende) return;
+    var rest = ende - Date.now();
+    if (rest <= 0) {
+      elText.textContent = '⏱ Zeit abgelaufen';
+      elChip.classList.add('ablauf');
+      clearInterval(timerIntervall); timerIntervall = null;
+      zeitOverlayZeigen();
+      return;
+    }
+    elText.textContent = '⏱ ' + restFormatieren(rest);
+    elChip.classList.toggle('ablauf', rest <= 5 * 60000);
+    /* In der letzten Minute sekündlich prüfen, damit der Hinweis pünktlich erscheint */
+    if (rest <= 60000 && timerIntervall) {
+      clearInterval(timerIntervall);
+      timerIntervall = setInterval(timerAnzeigen, 1000);
+    }
+  }
+
+  var overlaySchonGezeigt = false;
+  function zeitOverlayZeigen(){
+    if (overlaySchonGezeigt) return;
+    overlaySchonGezeigt = true;
+    document.getElementById('zeitOverlay').classList.add('offen');
+  }
+
+  document.getElementById('btnOverlaySchliessen').addEventListener('click', function(){
+    document.getElementById('zeitOverlay').classList.remove('offen');
+  });
+  document.getElementById('btnOverlayPdf').addEventListener('click', function(){
+    document.getElementById('zeitOverlay').classList.remove('offen');
+    document.getElementById('btnPdf').click();
+  });
+
+  function timerStarten(minuten){
+    var ende = Date.now() + minuten * 60000;
+    localStorage.setItem(TIMER_KEY, String(ende));
+    overlaySchonGezeigt = false;
+    elPanel.classList.remove('offen');
+    elBtnTimer.style.display = 'none';
+    elChip.classList.remove('ablauf');
+    elChip.classList.add('aktiv');
+    timerAnzeigen();
+    if (timerIntervall) clearInterval(timerIntervall);
+    timerIntervall = setInterval(timerAnzeigen, 60000);   /* aktualisiert jede Minute */
+  }
+
+  function timerBeenden(){
+    localStorage.removeItem(TIMER_KEY);
+    if (timerIntervall) { clearInterval(timerIntervall); timerIntervall = null; }
+    elChip.classList.remove('aktiv','ablauf');
+    elBtnTimer.style.display = '';
+  }
+
+  elBtnTimer.addEventListener('click', function(){
+    elPanel.classList.toggle('offen');
+    if (elPanel.classList.contains('offen')) document.getElementById('timerStunden').focus();
+  });
+
+  document.getElementById('btnTimerStart').addEventListener('click', function(){
+    var stunden = parseInt(document.getElementById('timerStunden').value, 10) || 0;
+    var minuten = parseInt(document.getElementById('timerMinuten').value, 10) || 0;
+    var gesamt = stunden * 60 + minuten;
+    if (gesamt < 1) { alert('Bitte eine Dauer von mindestens 1 Minute einstellen.'); return; }
+    timerStarten(gesamt);
+  });
+
+  document.getElementById('btnTimerStop').addEventListener('click', function(){
+    if (!confirm('Timer wirklich beenden?')) return;
+    timerBeenden();
+  });
+
+  /* Laufenden Timer nach Neuladen der Seite wiederherstellen */
+  (function(){
+    var ende = parseInt(localStorage.getItem(TIMER_KEY) || '0', 10);
+    if (ende && ende > Date.now()) {
+      elBtnTimer.style.display = 'none';
+      elChip.classList.add('aktiv');
+      timerAnzeigen();
+      timerIntervall = setInterval(timerAnzeigen, 60000);
+    } else if (ende) {
+      localStorage.removeItem(TIMER_KEY);
+    }
+  })();
+
+  /* ---------- TinyMCE ---------- */
+  tinymce.init({
+    selector: '#editor',
+    license_key: 'gpl',
+    language: 'de',
+    menubar: false,
+    statusbar: false,
+    branding: false,
+    resize: false,
+    highlight_on_focus: false,
+    /* Tabellen sind frei anpassbar, werden aber am Korrekturrand begrenzt (CSS max-width + PDF-Kappung) */
+    table_sizing_mode: 'relative',
+    table_toolbar: '',
+    plugins: 'lists table nonbreaking charmap pagebreak',
+    /* Formate: nur Absatz und eine Überschrift */
+    block_formats: 'Überschrift=h2; Absatz=p',
+    /* Hintergrundfarbe: nur Grau, plus "Farbe entfernen" */
+    color_map_background: [
+      'D9D9D9', 'Grau'
+    ],
+    custom_colors: false,
+    color_default_background: '#D9D9D9',
+    toolbar:
+      'undo redo | cut copy paste | pagebreak | blocks backcolor | ' +
+      'bold italic strikethrough superscript subscript underline | ' +
+      'alignleft aligncenter alignright alignjustify | ' +
+      'bullist numlist outdent indent | nonbreaking | table | charmap | pdfvorschau',
+    /* Blatt = exakt die PDF-Seite: A4 (794px) mit denselben Rändern wie pageMargins [56,92,170,56]pt
+       -> links 75px, oben 123px, rechts (Korrekturrand) 227px, unten 75px; Schrift wie im PDF: 11pt/1.3 */
+    content_style:
+      'html{background:#ececec;}' +
+      'body{box-sizing:border-box; background:#fff; width:794px; min-height:300px; margin:2.5rem auto;' +
+      ' padding:75px 227px 75px 75px;' +
+      ' font-family:Roboto,"Segoe UI",Arial,sans-serif; font-size:14.7px; line-height:1.3; color:#1F2A44;' +
+      ' box-shadow:0 1px 3px rgba(0,0,0,.18);}' +
+      'p{margin:2.7px 0;}' +
+      'h1{font-size:22.7px; font-weight:bold; margin:5.3px 0 8px;}' +
+      'h2{font-size:18.7px; font-weight:bold; margin:13.3px 0 5.3px;}' +
+      'ul,ol{margin:2.7px 0; padding-left:24px;} li{margin:1.3px 0;}' +
+      'table{table-layout:fixed; border-collapse:collapse; margin:5.3px 0 10.7px; width:100%; max-width:100% !important;} td,th{border:1px solid #999; padding:3px 5px; overflow-wrap:break-word;}' +
+      /* Seitenumbruch: graue Lücke über die volle Blattbreite -> wirkt wie zwei getrennte Seiten */
+      'img.mce-pagebreak{display:block !important; border:0 !important; height:4.5rem !important; background:#ececec !important;' +
+      ' width:calc(100% + 302px) !important; max-width:none !important; margin:2rem 0 2rem -75px !important; cursor:default !important;}' +
+      /* Kein blauer Rahmen beim Überfahren oder Auswählen der Lücke */
+      'img.mce-pagebreak:hover, img.mce-pagebreak[data-mce-selected]{outline:0 !important; box-shadow:none !important;}' +
+      'img{max-width:100%;}',
+    setup: function (editor) {
+      editor.ui.registry.addButton('pdfvorschau', {
+        icon: 'preview',
+        tooltip: 'Vorschau',
+        onAction: pdfVorschauZeigen
+      });
+      editor.on('input change keyup SetContent ExecCommand', speichernAnstossen);
+      editor.on('init', function () {
+        var inhalt = localStorage.getItem(SPEICHER_KEY);
+        if (inhalt) {
+          editor.setContent(inhalt);
+          statusAnzeigen('Gespeicherter Entwurf wiederhergestellt.');
+        }
+      });
+    }
+  });
+
+  document.getElementById('btnReset').addEventListener('click', function () {
+    if (!confirm('Wirklich neu anfangen? Der gespeicherte Entwurf wird dabei gelöscht.')) return;
+    localStorage.removeItem(SPEICHER_KEY);
+    tinymce.activeEditor.setContent('');
+    document.getElementById('examTitle').value = '';
+    document.getElementById('examName').value = '';
+    statusAnzeigen('Neuer, leerer Entwurf.');
+  });
+
+  /* ---------- PDF ---------- */
+  function safeName(s){
+    return (s || 'Klausur').replace(/[^\p{L}\p{N}_\- ]/gu,'').trim().replace(/\s+/g,'_') || 'Klausur';
+  }
+
+  /* Weicher Marken-Verlaufsbalken (hellblau -> blau -> grün -> mint) für pdfmake */
+  function gradientBalken(breite, hoehe){
+    var stops = [
+      {p:0.00, c:[0x6f,0xac,0xff]},
+      {p:0.22, c:[0x2B,0x62,0xB0]},
+      {p:0.65, c:[0x0F,0x5B,0x4B]},
+      {p:1.00, c:[0x2B,0xE0,0x80]}
+    ];
+    function farbeBei(t){
+      for (var i=0;i<stops.length-1;i++){
+        var a=stops[i], b=stops[i+1];
+        if (t>=a.p && t<=b.p){
+          var f=(t-a.p)/(b.p-a.p);
+          var r=Math.round(a.c[0]+(b.c[0]-a.c[0])*f);
+          var g=Math.round(a.c[1]+(b.c[1]-a.c[1])*f);
+          var bl=Math.round(a.c[2]+(b.c[2]-a.c[2])*f);
+          return '#'+[r,g,bl].map(function(x){return x.toString(16).padStart(2,'0');}).join('');
+        }
+      }
+      return '#2BE080';
+    }
+    var segmente = 60, teile = [];
+    var w = breite / segmente;
+    for (var i=0;i<segmente;i++){
+      teile.push({type:'rect', x:i*w, y:0, w:w+0.5, h:hoehe, color:farbeBei(i/(segmente-1))});
+    }
+    return teile;
+  }
+
+  document.getElementById('btnPdf').addEventListener('click', function () {
+    if (typeof htmlToPdfmake === 'undefined' || typeof pdfMake === 'undefined') {
+      alert('Die PDF-Bibliothek konnte nicht geladen werden. Bitte Seite neu laden.'); return;
+    }
+    var geprueft = felderPruefen();
+    if (!geprueft.ok) return;
+    var gebaut = bauePdf(geprueft.titel, geprueft.name);
+    pdfMake.createPdf(gebaut.docDefinition).download(gebaut.dateiname);
+  });
+
+  /* ---------- Validierung mit Inline-Hinweisen ---------- */
+  function felderPruefen(){
+    var titel = document.getElementById('examTitle').value.trim();
+    var name  = document.getElementById('examName').value.trim();
+    var feldTitel = document.getElementById('feldTitel');
+    var feldName  = document.getElementById('feldName');
+    feldTitel.classList.toggle('fehler', !titel);
+    feldName.classList.toggle('fehler', !name);
+    if (!titel) { document.getElementById('examTitle').focus(); }
+    else if (!name) { document.getElementById('examName').focus(); }
+    return { ok: !!(titel && name), titel: titel, name: name };
+  }
+  /* Hinweis verschwindet, sobald getippt wird */
+  document.getElementById('examTitle').addEventListener('input', function(){
+    document.getElementById('feldTitel').classList.remove('fehler');
+  });
+  document.getElementById('examName').addEventListener('input', function(){
+    document.getElementById('feldName').classList.remove('fehler');
+  });
+
+  /* ---------- PDF-Erzeugung (gemeinsam für Download und Vorschau) ---------- */
+  function bauePdf(titel, name){
+    var html = tinymce.activeEditor.getContent();
+
+    /* Tabellenbreiten kappen: nie breiter als der Textbereich (Korrekturrand bleibt frei) */
+    var tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    tmp.querySelectorAll('table').forEach(function(t){
+      var w = t.style.width || '';
+      if (w.indexOf('%') !== -1) {
+        if (parseFloat(w) > 100) t.style.width = '100%';
+      } else if (w) {
+        t.style.width = '100%';
+      }
+      if (t.getAttribute('width')) t.removeAttribute('width');
+    });
+    html = tmp.innerHTML;
+
+    var pdfmakeOptionen = {
+      window: window, tableAutoSize: true,
+      defaultStyles: {
+        h1:{fontSize:17,bold:true,color:'#1F2A44',margin:[0,4,0,6]},
+        h2:{fontSize:14,bold:true,color:'#1F2A44',margin:[0,10,0,4]},
+        p:{margin:[0,2,0,2]}, li:{margin:[0,1,0,1]}, table:{margin:[0,4,0,8]},
+        a:{color:'#1F2A44',decoration:null}
+      }
+    };
+
+    /* TinyMCE speichert Seitenumbrüche als <!-- pagebreak -->:
+       Inhalt daran aufteilen und jeden weiteren Teil auf einer neuen PDF-Seite beginnen */
+    var teile = html.split(/<!--\s*pagebreak\s*-->/i);
+    var content = [];
+    teile.forEach(function(teil, i){
+      var konvertiert = htmlToPdfmake(teil, pdfmakeOptionen);
+      if (i === 0) {
+        content = content.concat(konvertiert);
+      } else if (konvertiert.length) {
+        content.push({stack: konvertiert, pageBreak: 'before'});
+      } else {
+        content.push({text: '', pageBreak: 'before'});
+      }
+    });
+
+    var docDefinition = {
+      pageSize:'A4',
+      pageMargins:[56, 92, 170, 56],
+      defaultStyle:{font:'Roboto',fontSize:11,lineHeight:1.3,color:'#1F2A44'},
+      header: function () { return {
+        margin:[56,34,56,0],
+        stack:[
+          {columns:[
+            {text:titel,bold:true,fontSize:12},
+            {text:name,alignment:'right',color:'#7A8194',fontSize:10,margin:[0,2,0,0]}
+          ]},
+          {canvas: gradientBalken(483, 2.5), margin:[0,6,0,0]}
+        ]}; },
+      footer:function(currentPage,pageCount){ return {
+        margin:[56,8,56,0],
+        columns:[
+          {text:'', fontSize:9},
+          {text:'Seite '+currentPage+' von '+pageCount,alignment:'right',color:'#7A8194',fontSize:9}
+        ]
+      }; },
+      content: content
+    };
+    var dateiname = safeName(titel) + '_' + safeName(name) + '.pdf';
+    return { docDefinition: docDefinition, dateiname: dateiname };
+  }
+
+  /* ---------- PDF-Vorschau ---------- */
+  var vorschauUrl = null;
+
+  function pdfVorschauZeigen(){
+    if (typeof htmlToPdfmake === 'undefined' || typeof pdfMake === 'undefined') {
+      alert('Die PDF-Bibliothek konnte nicht geladen werden. Bitte Seite neu laden.'); return;
+    }
+    var geprueft = felderPruefen();
+    if (!geprueft.ok) return;
+    var gebaut = bauePdf(geprueft.titel, geprueft.name);
+    pdfMake.createPdf(gebaut.docDefinition).getBlob(function(blob){
+      if (vorschauUrl) URL.revokeObjectURL(vorschauUrl);
+      vorschauUrl = URL.createObjectURL(blob);
+      document.getElementById('pdfFrame').src = vorschauUrl;
+      document.getElementById('pdfOverlay').classList.add('offen');
+    });
+  }
+
+  function pdfVorschauSchliessen(){
+    document.getElementById('pdfOverlay').classList.remove('offen');
+    document.getElementById('pdfFrame').src = 'about:blank';
+    if (vorschauUrl) { URL.revokeObjectURL(vorschauUrl); vorschauUrl = null; }
+  }
+
+  document.getElementById('btnVorschauSchliessen').addEventListener('click', pdfVorschauSchliessen);
+  document.getElementById('btnVorschauDownload').addEventListener('click', function(){
+    var geprueft = felderPruefen();
+    if (!geprueft.ok) { pdfVorschauSchliessen(); return; }
+    var gebaut = bauePdf(geprueft.titel, geprueft.name);
+    pdfMake.createPdf(gebaut.docDefinition).download(gebaut.dateiname);
+  });
+</script>
+</body>
+</html>
